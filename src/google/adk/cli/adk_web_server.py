@@ -32,7 +32,9 @@ from typing import Optional
 from fastapi import FastAPI
 from fastapi import HTTPException
 from fastapi import Query
+from fastapi import Request
 from fastapi import Response
+
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from fastapi.responses import StreamingResponse
@@ -60,7 +62,9 @@ from ..agents.live_request_queue import LiveRequest
 from ..agents.live_request_queue import LiveRequestQueue
 from ..agents.run_config import RunConfig
 from ..agents.run_config import StreamingMode
+from ..agents.invocation_context import RequestContext
 from ..apps.app import App
+
 from ..artifacts.base_artifact_service import ArtifactVersion
 from ..artifacts.base_artifact_service import BaseArtifactService
 from ..auth.credential_service.base_credential_service import BaseCredentialService
@@ -1484,19 +1488,22 @@ class AdkWebServer:
       await self.memory_service.add_session_to_memory(session)
 
     @app.post("/run", response_model_exclude_none=True)
-    async def run_agent(req: RunAgentRequest) -> list[Event]:
+    async def run_agent(req: RunAgentRequest, request: Request) -> list[Event]:
       session = await self.session_service.get_session(
           app_name=req.app_name, user_id=req.user_id, session_id=req.session_id
       )
       if not session:
         raise HTTPException(status_code=404, detail="Session not found")
       runner = await self.get_runner_async(req.app_name)
+      # Create request context from HTTP headers
+      request_context = RequestContext(headers=dict(request.headers))
       async with Aclosing(
           runner.run_async(
               user_id=req.user_id,
               session_id=req.session_id,
               new_message=req.new_message,
               state_delta=req.state_delta,
+              request_context=request_context,
           )
       ) as agen:
         events = [event async for event in agen]
@@ -1504,14 +1511,20 @@ class AdkWebServer:
       logger.debug("Events generated: %s", events)
       return events
 
+
     @app.post("/run_sse")
-    async def run_agent_sse(req: RunAgentRequest) -> StreamingResponse:
+    async def run_agent_sse(
+        req: RunAgentRequest, request: Request
+    ) -> StreamingResponse:
       # SSE endpoint
       session = await self.session_service.get_session(
           app_name=req.app_name, user_id=req.user_id, session_id=req.session_id
       )
       if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+
+      # Create request context from HTTP headers
+      request_context = RequestContext(headers=dict(request.headers))
 
       # Convert the events to properly formatted SSE
       async def event_generator():
@@ -1528,6 +1541,7 @@ class AdkWebServer:
                   state_delta=req.state_delta,
                   run_config=RunConfig(streaming_mode=stream_mode),
                   invocation_id=req.invocation_id,
+                  request_context=request_context,
               )
           ) as agen:
             async for event in agen:
@@ -1640,6 +1654,9 @@ class AdkWebServer:
 
       live_request_queue = LiveRequestQueue()
 
+      # Create request context from WebSocket headers
+      request_context = RequestContext(headers=dict(websocket.headers))
+
       async def forward_events():
         runner = await self.get_runner_async(app_name)
         run_config = RunConfig(response_modalities=modalities)
@@ -1648,8 +1665,10 @@ class AdkWebServer:
                 session=session,
                 live_request_queue=live_request_queue,
                 run_config=run_config,
+                request_context=request_context,
             )
         ) as agen:
+
           async for event in agen:
             await websocket.send_text(
                 event.model_dump_json(exclude_none=True, by_alias=True)

@@ -95,6 +95,25 @@ class _InvocationCostManager(BaseModel):
       )
 
 
+class RequestContext(BaseModel):
+  """Context from the incoming HTTP request.
+
+  This class captures HTTP request metadata when agents are served via FastAPI.
+  It allows tools to access request headers (such as Authorization bearer
+  tokens) and other request information.
+
+  Attributes:
+    headers: A dictionary of HTTP headers from the incoming request.
+  """
+
+  model_config = ConfigDict(
+      extra="forbid",
+  )
+
+  headers: dict[str, str] = Field(default_factory=dict)
+  """HTTP headers from the incoming request."""
+
+
 class InvocationContext(BaseModel):
   """An invocation context represents the data of a single invocation of an agent.
 
@@ -205,6 +224,11 @@ class InvocationContext(BaseModel):
 
   canonical_tools_cache: Optional[list[BaseTool]] = None
   """The cache of canonical tools for this invocation."""
+
+  request_context: Optional[RequestContext] = None
+  """HTTP request context when running via FastAPI. Contains headers and other
+  request metadata that can be accessed by tools."""
+
 
   _invocation_cost_manager: _InvocationCostManager = PrivateAttr(
       default_factory=_InvocationCostManager

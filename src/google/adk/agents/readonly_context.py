@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 
   from ..sessions.session import Session
   from .invocation_context import InvocationContext
+  from .invocation_context import RequestContext
   from .run_config import RunConfig
 
 
@@ -69,3 +70,12 @@ class ReadonlyContext:
   def run_config(self) -> Optional[RunConfig]:
     """The run config of the current invocation. READONLY field."""
     return self._invocation_context.run_config
+
+  @property
+  def request_context(self) -> Optional[RequestContext]:
+    """The HTTP request context. READONLY field.
+
+    Contains headers and other request metadata when the agent is served
+    via FastAPI. Returns None when not running in a web server context.
+    """
+    return self._invocation_context.request_context
